@@ -1,0 +1,2 @@
+hiredis>=1.0.0
+uvloop>=0.12.1
