@@ -16,6 +16,7 @@ dictionary = {}  # type: Dict[bytes, Any]
 
 class RedisProtocol(asyncio.Protocol):
     def __init__(self):
+        self.response = collections.deque()
         self.parser = hiredis.Reader()
         self.transport = None  # type: asyncio.transports.Transport
         self.commands = {
@@ -51,14 +52,14 @@ class RedisProtocol(asyncio.Protocol):
             return
         """
         self.parser.feed(data)
-        response = collections.deque()
 
         while True:
             req = self.parser.gets()
             if req == False:  # Do NOT simplify!
                 break
-            response.append(self.commands[req[0]](*req[1:]))
-        self.transport.write(b"".join(response))
+            self.response.append(self.commands[req[0]](*req[1:]))
+        self.transport.write(b"".join(self.response))
+        self.response.clear()
 
     def command(self):
         # Far from being a complete implementation of the `COMMAND` command of
@@ -114,16 +115,16 @@ class RedisProtocol(asyncio.Protocol):
         return b"+OK\r\n"
 
     def get(self, key: bytes) -> bytes:
-        try:
-            if expiration[key] < time.monotonic():
-                del dictionary[key]
-                del expiration[key]
-                return b"$-1\r\n"
-            else:
-                value = dictionary[key]
-                return b"$%d\r\n%s\r\n" % (len(value), value)
-        except KeyError:
+        if key not in dictionary:
             return b"$-1\r\n"
+
+        if key in expiration and expiration[key] < time.monotonic():
+            del dictionary[key]
+            del expiration[key]
+            return b"$-1\r\n"
+        else:
+            value = dictionary[key]
+            return b"$%d\r\n%s\r\n" % (len(value), value)
 
     def ping(self, message=b"PONG"):
         return b"$%d\r\n%s\r\n" % (len(message), message)
