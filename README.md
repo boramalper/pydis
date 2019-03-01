@@ -9,16 +9,22 @@ in the name of marginal performance gains, often trading many other conveniences
 (such as type safety, garbage collection, *etc*) too.
 
 Below you will find a [Redis](https://github.com/antirez/redis/) clone,
-**pydis**, written *in < 250 lines of "interpreted" Python code*, providing a
+**pydis**, written *in < 250 lines of idiomatic Python code*, providing a
 subset of redis' functionality for which there are
 [official benchmarks](https://redis.io/topics/benchmarks).
 
 Briefly, **pydis** is ~60% as fast as Redis measured in number operations per
 second.
 
+P.S. This is not a criticism of Redis, which is a brilliant project and a 
+system-level software that powers thousands of infrastructures. It just happened
+to be one of the fastest software I could imagine *and* clone the same day.
+
 ## Results
 
-<center>![The bar graph](plot.svg)</center>
+<center>
+  <img src="plot.svg" alt="The Bar Graph">
+</center>
 
 Benchmark | pydis | redis | Ratio
 --- | ---: | ---: | ---
@@ -42,3 +48,20 @@ MSET | 157,963 | 172,226 | 0.917
 - Ubuntu 18.04
 - Python 3.6.7 (GCC 8.2.0)
 - Redis server v=4.0.9 malloc=jemalloc-3.6.0 bits=64 build=76095d16786fbcba
+
+## Contributions
+Contributions are very welcome, given that they fall into one of the following
+categories:
+
+- Those that improve the performance.
+  - The aim of this exercise is to prove that Python 3 can be just as fast as
+    C. So whilst using a faster parser in C with Python bindings is okay,
+    rewriting it in [Cython](https://cython.org/) is not.
+  - I will accept "minor" deviations from idioms only if the performance gains
+    are worth it; stick to idiomatic Python otherwise!
+- Those to achieve feature parity with Redis *for which there are official
+  benchmarks*.
+  - We are not trying to develop a full-featured Redis clone here so please do 
+    not implement commands for which there are no official benchmarks.
+- Those that fix formatting etc.
+  - Please do not invent your own style, use PEP 8.
