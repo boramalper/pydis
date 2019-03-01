@@ -16,6 +16,7 @@ dictionary = {}  # type: Dict[bytes, Any]
 
 class RedisProtocol(asyncio.Protocol):
     def __init__(self):
+        self.dictionary = dictionary
         self.response = collections.deque()
         self.parser = hiredis.Reader()
         self.transport = None  # type: asyncio.transports.Transport
@@ -39,26 +40,17 @@ class RedisProtocol(asyncio.Protocol):
     def connection_made(self, transport: asyncio.transports.Transport):
         self.transport = transport
 
-    def resume_writing(self):
-        print("RESUME!")
-
-    def pause_writing(self):
-        print("PAUSE!")
-
     def data_received(self, data: bytes):
-        """
-        if data == b"PING\r\n":
-            return b"+PONG\r\n"
-            return
-        """
         self.parser.feed(data)
 
-        while True:
+        while 1:
             req = self.parser.gets()
-            if req == False:  # Do NOT simplify!
+            if req is False:
                 break
-            self.response.append(self.commands[req[0]](*req[1:]))
-        self.transport.write(b"".join(self.response))
+            else:
+                self.response.append(self.commands[req[0].upper()](*req[1:]))
+
+        self.transport.writelines(self.response)
         self.response.clear()
 
     def command(self):
@@ -100,10 +92,10 @@ class RedisProtocol(asyncio.Protocol):
         if cond == b"":
             pass
         elif cond == b"NX":
-            if key in dictionary:
+            if key in self.dictionary:
                 return b"$-1\r\n"
         elif cond == b"XX":
-            if key not in dictionary:
+            if key not in self.dictionary:
                 return b"$-1\r\n"
         else:
             return b"-ERR syntax error\r\n"
@@ -111,50 +103,50 @@ class RedisProtocol(asyncio.Protocol):
         if expires_at:
             expiration[key] = expires_at
 
-        dictionary[key] = value
+        self.dictionary[key] = value
         return b"+OK\r\n"
 
     def get(self, key: bytes) -> bytes:
-        if key not in dictionary:
+        if key not in self.dictionary:
             return b"$-1\r\n"
 
         if key in expiration and expiration[key] < time.monotonic():
-            del dictionary[key]
+            del self.dictionary[key]
             del expiration[key]
             return b"$-1\r\n"
         else:
-            value = dictionary[key]
+            value = self.dictionary[key]
             return b"$%d\r\n%s\r\n" % (len(value), value)
 
     def ping(self, message=b"PONG"):
         return b"$%d\r\n%s\r\n" % (len(message), message)
 
     def incr(self, key):
-        value = dictionary.get(key, 0)
+        value = self.dictionary.get(key, 0)
         if type(value) is str:
             try:
                 value = int(value)
             except ValueError:
                 return b"-value is not an integer or out of range\r\n"
         value += 1
-        dictionary[key] = str(value)
+        self.dictionary[key] = str(value)
         return b":%d\r\n" % (value,)
 
     def lpush(self, key, *values):
-        deque = dictionary.get(key, collections.deque())
+        deque = self.dictionary.get(key, collections.deque())
         deque.extendleft(values)
-        dictionary[key] = deque
+        self.dictionary[key] = deque
         return b":%d\r\n" % (len(deque),)
 
     def rpush(self, key, *values):
-        deque = dictionary.get(key, collections.deque())
+        deque = self.dictionary.get(key, collections.deque())
         deque.extend(values)
-        dictionary[key] = deque
+        self.dictionary[key] = deque
         return b":%d\r\n" % (len(deque),)
 
     def lpop(self, key):
         try:
-            deque = dictionary[key]  # type: collections.deque
+            deque = self.dictionary[key]  # type: collections.deque
         except KeyError:
             return b"$-1\r\n"
         value = deque.popleft()
@@ -162,30 +154,30 @@ class RedisProtocol(asyncio.Protocol):
 
     def rpop(self, key):
         try:
-            deque = dictionary[key]  # type: collections.deque
+            deque = self.dictionary[key]  # type: collections.deque
         except KeyError:
             return b"$-1\r\n"
         value = deque.pop()
         return b"$%d\r\n%s\r\n" % (len(value), value)
 
     def sadd(self, key, *members):
-        set_ = dictionary.get(key, set())
+        set_ = self.dictionary.get(key, set())
         prev_size = len(set_)
         for member in members:
             set_.add(member)
-        dictionary[key] = set_
+        self.dictionary[key] = set_
         return b":%d\r\n" % (len(set_) - prev_size,)
 
     def hset(self, key, field, value):
-        hash_ = dictionary.get(key, {})
+        hash_ = self.dictionary.get(key, {})
         ret = int(field in hash_)
         hash_[field] = value
-        dictionary[key] = hash_
+        self.dictionary[key] = hash_
         return b":%d\r\n" % (ret,)
 
     def spop(self, key):  # TODO add `count`
         try:
-            set_ = dictionary[key]  # type: set
+            set_ = self.dictionary[key]  # type: set
             elem = set_.pop()
         except KeyError:
             return b"$-1\r\n"
@@ -195,7 +187,7 @@ class RedisProtocol(asyncio.Protocol):
         start = int(start)
         stop = int(stop)
         try:
-            deque = dictionary[key]  # type: collections.deque
+            deque = self.dictionary[key]  # type: collections.deque
         except KeyError:
             return b"$-1\r\n"
         l = list(itertools.islice(deque, start, stop))
@@ -205,7 +197,7 @@ class RedisProtocol(asyncio.Protocol):
         for i in range(0, len(args), 2):
             key = args[i]
             value = args[i + 1]
-            dictionary[key] = value
+            self.dictionary[key] = value
         return b"+OK\r\n"
 
 
