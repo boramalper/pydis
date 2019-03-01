@@ -1,3 +1,4 @@
+from collections import deque
 from typing import *
 
 import asyncio
@@ -5,6 +6,7 @@ import collections
 import itertools
 import sys
 import time
+from typing import Any
 
 import hiredis
 import uvloop
@@ -190,8 +192,8 @@ class RedisProtocol(asyncio.Protocol):
             deque = self.dictionary[key]  # type: collections.deque
         except KeyError:
             return b"$-1\r\n"
-        l = list(itertools.islice(deque, start, stop))
-        return b"*%d\r\n%s" % (len(l), b"".join([b"$%d\r\n%s\r\n" % (len(e), e) for e in l]))
+        l = itertools.islice(deque, start, stop)
+        return b"*%d\r\n%s" % (stop - start, b"".join(b"$%d\r\n%s\r\n" % (len(e), e) for e in l))
 
     def mset(self, *args):
         for i in range(0, len(args), 2):
