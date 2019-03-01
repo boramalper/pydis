@@ -8,15 +8,17 @@ task they are given, spend countless hours by making life harder for themselves
 in the name of marginal performance gains, often trading many other conveniences
 (such as type safety, garbage collection, *etc*) too.
 
-Below you will find a [Redis](https://github.com/antirez/redis/) clone, **pydis**,
-written in < 250 lines of "interpreted" Python code, providing a subset of redis'
-functionality for which there are [official benchmarks](https://redis.io/topics/benchmarks).
+Below you will find a [Redis](https://github.com/antirez/redis/) clone,
+**pydis**, written *in < 250 lines of "interpreted" Python code*, providing a
+subset of redis' functionality for which there are
+[official benchmarks](https://redis.io/topics/benchmarks).
 
-Briefly, **pydis** is ~60% as fast as Redis measured in number operations per second.
+Briefly, **pydis** is ~60% as fast as Redis measured in number operations per
+second.
 
 ## Results
 
-![xx](plot.svg)
+<center>![The bar graph](plot.svg)</center>
 
 Benchmark | pydis | redis | Ratio
 --- | ---: | ---: | ---
@@ -40,6 +42,3 @@ MSET | 157,963 | 172,226 | 0.917
 - Ubuntu 18.04
 - Python 3.6.7 (GCC 8.2.0)
 - Redis server v=4.0.9 malloc=jemalloc-3.6.0 bits=64 build=76095d16786fbcba
-
-
-
