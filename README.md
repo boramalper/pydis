@@ -55,6 +55,20 @@ MSET | 157,963 | 172,226 | 0.917
 - Python 3.6.7 (GCC 8.2.0)
 - Redis 4.0.9 `malloc=jemalloc-3.6.0 bits=64 build=76095d16786fbcba`
 
+## Donations
+### Patreon
+https://www.patreon.com/boramalper
+
+### PayPal
+https://paypal.me/boramalper
+
+### Cryptocurrencies (Coinbase)
+- **BTC:** `3BLWjamWug3QQzcDDGwYLwuCqJyjcfYJB8`
+- **LTC:** `MRWX5SGCF7EvN15gpzT5b3KQD3Z91gH8qi`
+- **BCH:** `qqn07a58hax9l8pckq9j8ys6dsh2cnu4rsyztw2kj9`
+- **ETH:** `0xe5A8e80bAA6129DF7eBB1B5302F9e2Ef4C6f6E62`
+- **ETC:** `0x8964EcC86eaf043Bff2CdfE875E73D8095c26a58`
+
 ## Contributions
 Contributions are very welcome, given that they fall into one of the following
 categories:
