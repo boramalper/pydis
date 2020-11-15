@@ -1,12 +1,9 @@
-from collections import deque
-from typing import *
-
 import asyncio
 import collections
 import itertools
 import sys
 import time
-from typing import Any
+from typing import Any, Dict, Optional
 
 import hiredis
 import uvloop
@@ -18,25 +15,24 @@ dictionary = {}  # type: Dict[bytes, Any]
 
 class RedisProtocol(asyncio.Protocol):
     def __init__(self):
-        self.dictionary = dictionary
         self.response = collections.deque()
         self.parser = hiredis.Reader()
-        self.transport = None  # type: asyncio.transports.Transport
+        self.transport = None  # type: Optional[asyncio.transports.Transport]
         self.commands = {
-            b"COMMAND": self.command,
-            b"SET": self.set,
-            b"GET": self.get,
-            b"PING": self.ping,
-            b"INCR": self.incr,
-            b"LPUSH": self.lpush,
-            b"RPUSH": self.rpush,
-            b"LPOP": self.lpop,
-            b"RPOP": self.rpop,
-            b"SADD": self.sadd,
-            b"HSET": self.hset,
-            b"SPOP": self.spop,
-            b"LRANGE": self.lrange,
-            b"MSET": self.mset,
+            b"COMMAND": self.com_command,
+            b"SET": self.com_set,
+            b"GET": self.com_get,
+            b"PING": self.com_ping,
+            b"INCR": self.com_incr,
+            b"LPUSH": self.com_lpush,
+            b"RPUSH": self.com_rpush,
+            b"LPOP": self.com_lpop,
+            b"RPOP": self.com_rpop,
+            b"SADD": self.com_sadd,
+            b"HSET": self.com_hset,
+            b"SPOP": self.com_spop,
+            b"LRANGE": self.com_lrange,
+            b"MSET": self.com_mset,
         }
 
     def connection_made(self, transport: asyncio.transports.Transport):
@@ -45,7 +41,7 @@ class RedisProtocol(asyncio.Protocol):
     def data_received(self, data: bytes):
         self.parser.feed(data)
 
-        while 1:
+        while True:
             req = self.parser.gets()
             if req is False:
                 break
@@ -55,17 +51,44 @@ class RedisProtocol(asyncio.Protocol):
         self.transport.writelines(self.response)
         self.response.clear()
 
-    def command(self):
+    def evict_if_expired(self, key):
+        if key in expiration and expiration[key] < time.monotonic():
+            del dictionary[key]
+            del expiration[key]
+
+    def get(self, key, default=None):
+        self.evict_if_expired(key)
+        return dictionary.get(key, default)
+
+    def set(self, key, value, expires_at: Optional[float] = None):
+        """
+        Sets key to value and clears expiration.
+        :param key:
+        :param value:
+        :param expires_at:
+        :return:
+        """
+        dictionary[key] = value
+        if expires_at is not None:
+            expiration[key] = expires_at
+        else:
+            expiration.pop(key, None)
+
+    def com_command(self):
         # Far from being a complete implementation of the `COMMAND` command of
         # Redis, yet sufficient for us to start using redis-cli.
         return b"+OK\r\n"
 
-    def set(self, *args) -> bytes:
+    def com_set(self, *args) -> bytes:
         # Defaults
         key = args[0]
         value = args[1]
         expires_at = None
         cond = b""
+
+        # Do not forget to evict keys if expired, which matters for NX and XX
+        # flags.
+        self.evict_if_expired(key)
 
         largs = len(args)
         if largs == 3:
@@ -94,118 +117,123 @@ class RedisProtocol(asyncio.Protocol):
         if cond == b"":
             pass
         elif cond == b"NX":
-            if key in self.dictionary:
+            if key in dictionary:
                 return b"$-1\r\n"
         elif cond == b"XX":
-            if key not in self.dictionary:
+            if key not in dictionary:
                 return b"$-1\r\n"
         else:
             return b"-ERR syntax error\r\n"
 
-        if expires_at:
-            expiration[key] = expires_at
-
-        self.dictionary[key] = value
+        self.set(key, value, expires_at)
         return b"+OK\r\n"
 
-    def get(self, key: bytes) -> bytes:
-        if key not in self.dictionary:
+    def com_get(self, key: bytes) -> bytes:
+        value = self.get(key)
+        if not value:
             return b"$-1\r\n"
+        if not isinstance(value, bytes):
+            return b"-WRONGTYPE Operation against a key holding the wrong kind of value"
+        return b"$%d\r\n%s\r\n" % (len(value), value)
 
-        if key in expiration and expiration[key] < time.monotonic():
-            del self.dictionary[key]
-            del expiration[key]
-            return b"$-1\r\n"
-        else:
-            value = self.dictionary[key]
-            return b"$%d\r\n%s\r\n" % (len(value), value)
-
-    def ping(self, message=b"PONG"):
+    def com_ping(self, message=b"PONG"):
         return b"$%d\r\n%s\r\n" % (len(message), message)
 
-    def incr(self, key):
-        value = self.dictionary.get(key, 0)
-        if type(value) is str:
+    def com_incr(self, key):
+        value = self.get(key) or 0
+        if type(value) is bytes:
             try:
                 value = int(value)
             except ValueError:
                 return b"-value is not an integer or out of range\r\n"
         value += 1
-        self.dictionary[key] = str(value)
+        self.set(key, str(value).encode("ascii"))
         return b":%d\r\n" % (value,)
 
-    def lpush(self, key, *values):
-        deque = self.dictionary.get(key, collections.deque())
+    def com_lpush(self, key, *values):
+        deque = self.get(key, collections.deque())
+        if not isinstance(deque, collections.deque):
+            return b"-WRONGTYPE Operation against a key holding the wrong kind of value"
         deque.extendleft(values)
-        self.dictionary[key] = deque
+        self.set(key, deque)
         return b":%d\r\n" % (len(deque),)
 
-    def rpush(self, key, *values):
-        deque = self.dictionary.get(key, collections.deque())
+    def com_rpush(self, key, *values):
+        deque = self.get(key, collections.deque())
+        if not isinstance(deque, collections.deque):
+            return b"-WRONGTYPE Operation against a key holding the wrong kind of value"
         deque.extend(values)
-        self.dictionary[key] = deque
+        self.set(key, deque)
         return b":%d\r\n" % (len(deque),)
 
-    def lpop(self, key):
-        try:
-            deque = self.dictionary[key]  # type: collections.deque
-        except KeyError:
+    def com_lpop(self, key):
+        deque = self.get(key)
+        if deque is None:
             return b"$-1\r\n"
+        if not isinstance(deque, collections.deque):
+            return b"-WRONGTYPE Operation against a key holding the wrong kind of value"
         value = deque.popleft()
         return b"$%d\r\n%s\r\n" % (len(value), value)
 
-    def rpop(self, key):
-        try:
-            deque = self.dictionary[key]  # type: collections.deque
-        except KeyError:
+    def com_rpop(self, key):
+        deque = self.get(key)
+        if deque is None:
             return b"$-1\r\n"
+        if not isinstance(deque, collections.deque):
+            return b"-WRONGTYPE Operation against a key holding the wrong kind of value"
         value = deque.pop()
         return b"$%d\r\n%s\r\n" % (len(value), value)
 
-    def sadd(self, key, *members):
-        set_ = self.dictionary.get(key, set())
+    def com_sadd(self, key, *members):
+        set_ = self.get(key, set())
+        if not isinstance(set_, set):
+            return b"-WRONGTYPE Operation against a key holding the wrong kind of value"
         prev_size = len(set_)
         for member in members:
             set_.add(member)
-        self.dictionary[key] = set_
+        self.set(key, set_)
         return b":%d\r\n" % (len(set_) - prev_size,)
 
-    def hset(self, key, field, value):
-        hash_ = self.dictionary.get(key, {})
+    def com_hset(self, key, field, value):
+        hash_ = self.get(key, {})
+        if not isinstance(hash_, dict):
+            return b"-WRONGTYPE Operation against a key holding the wrong kind of value"
         ret = int(field in hash_)
         hash_[field] = value
-        self.dictionary[key] = hash_
+        self.set(key, hash_)
         return b":%d\r\n" % (ret,)
 
-    def spop(self, key):  # TODO add `count`
-        try:
-            set_ = self.dictionary[key]  # type: set
-            elem = set_.pop()
-        except KeyError:
+    def com_spop(self, key):  # TODO add `count`
+        set_ = self.get(key)
+        if set_ is None:
             return b"$-1\r\n"
+        if not isinstance(set_, set):
+            return b"-WRONGTYPE Operation against a key holding the wrong kind of value"
+        if len(set_) == 0:
+            return b"$-1\r\n"
+        elem = set_.pop()
         return b"$%d\r\n%s\r\n" % (len(elem), elem)
 
-    def lrange(self, key, start, stop):
+    def com_lrange(self, key, start, stop):
         start = int(start)
         stop = int(stop)
-        try:
-            deque = self.dictionary[key]  # type: collections.deque
-        except KeyError:
+        deque = self.get(key)
+        if deque is None:
             return b"$-1\r\n"
-        l = itertools.islice(deque, start, stop)
-        return b"*%d\r\n%s" % (stop - start, b"".join(b"$%d\r\n%s\r\n" % (len(e), e) for e in l))
+        if not isinstance(deque, collections.deque):
+            return b"-WRONGTYPE Operation against a key holding the wrong kind of value"
+        l = list(itertools.islice(deque, start, stop + 1))
+        return b"*%d\r\n%s" % (len(l), b"".join(b"$%d\r\n%s\r\n" % (len(e), e) for e in l))
 
-    def mset(self, *args):
+    def com_mset(self, *args):
         for i in range(0, len(args), 2):
             key = args[i]
             value = args[i + 1]
-            self.dictionary[key] = value
+            self.set(key, value)
         return b"+OK\r\n"
 
 
 def main() -> int:
-    print("Hello, World!")
-
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
     loop = asyncio.get_event_loop()
@@ -214,7 +242,7 @@ def main() -> int:
     server = loop.run_until_complete(coro)
 
     # Serve requests until Ctrl+C is pressed
-    print('Serving on {}'.format(server.sockets[0].getsockname()))
+    print("Serving on {}".format(server.sockets[0].getsockname()))
     try:
         loop.run_forever()
     except KeyboardInterrupt:
